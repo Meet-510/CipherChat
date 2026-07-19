@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { axiosInstance } from "../lib/axios.js";
 import toast from "react-hot-toast";
 import { io } from "socket.io-client";
+import { useChatStore } from "./useChatStore.js";
 
 const BASE_URL = import.meta.env.MODE === "development" ? "http://localhost:5001" : "/";
 
@@ -10,6 +11,8 @@ export const useAuthStore = create((set, get) => ({
   isSigningUp: false,
   isLoggingIn: false,
   isUpdatingProfile: false,
+  isSendingResetLink: false,
+  isResettingPassword: false,
   isCheckingAuth: true,
   onlineUsers: [],
   socket: null,
@@ -57,6 +60,34 @@ export const useAuthStore = create((set, get) => ({
     }
   },
 
+  forgotPassword: async (email) => {
+    set({ isSendingResetLink: true });
+    try {
+      const res = await axiosInstance.post("/auth/forgot-password", { email });
+      toast.success(res.data.message);
+      return true;
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Something went wrong");
+      return false;
+    } finally {
+      set({ isSendingResetLink: false });
+    }
+  },
+
+  resetPassword: async (token, password) => {
+    set({ isResettingPassword: true });
+    try {
+      const res = await axiosInstance.post(`/auth/reset-password/${token}`, { password });
+      toast.success(res.data.message);
+      return true;
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Something went wrong");
+      return false;
+    } finally {
+      set({ isResettingPassword: false });
+    }
+  },
+
   logout: async () => {
     try {
       await axiosInstance.post("/auth/logout");
@@ -91,15 +122,35 @@ export const useAuthStore = create((set, get) => ({
         userId: authUser._id,
       },
     });
-    socket.connect();
 
     set({ socket: socket });
 
     socket.on("getOnlineUsers", (userIds) => {
       set({ onlineUsers: userIds });
     });
+
+    // global chat listeners (live sidebar previews + open-chat updates)
+    useChatStore.getState().initSocketListeners(socket);
+
+    // keep other users' profile info (picture, bio) fresh everywhere in the app
+    socket.on("profileUpdated", (updatedUser) => {
+      useChatStore.setState((state) => ({
+        users: state.users.map((user) =>
+          user._id === updatedUser._id ? { ...user, ...updatedUser } : user
+        ),
+        selectedUser:
+          state.selectedUser?._id === updatedUser._id
+            ? { ...state.selectedUser, ...updatedUser }
+            : state.selectedUser,
+      }));
+    });
   },
   disconnectSocket: () => {
-    if (get().socket?.connected) get().socket.disconnect();
+    const socket = get().socket;
+    if (socket) {
+      socket.removeAllListeners();
+      socket.disconnect();
+      set({ socket: null, onlineUsers: [] });
+    }
   },
 }));

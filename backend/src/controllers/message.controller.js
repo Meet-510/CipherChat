@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import User from "../models/user.model.js";
 import Message from "../models/message.model.js";
 
@@ -9,7 +10,53 @@ export const getUsersForSidebar = async (req, res) => {
     const loggedInUserId = req.user._id;
     const filteredUsers = await User.find({ _id: { $ne: loggedInUserId } }).select("-password");
 
-    res.status(200).json(filteredUsers);
+    // last message + unread count per conversation, Instagram-style
+    const myId = new mongoose.Types.ObjectId(String(loggedInUserId));
+    const conversations = await Message.aggregate([
+      { $match: { $or: [{ senderId: myId }, { receiverId: myId }] } },
+      { $sort: { createdAt: -1 } },
+      {
+        $group: {
+          _id: { $cond: [{ $eq: ["$senderId", myId] }, "$receiverId", "$senderId"] },
+          lastMessage: { $first: "$$ROOT" },
+          unreadCount: {
+            $sum: {
+              $cond: [
+                { $and: [{ $eq: ["$receiverId", myId] }, { $eq: ["$read", false] }] },
+                1,
+                0,
+              ],
+            },
+          },
+        },
+      },
+    ]);
+
+    const conversationMap = {};
+    for (const convo of conversations) {
+      conversationMap[String(convo._id)] = convo;
+    }
+
+    const usersWithMeta = filteredUsers.map((user) => {
+      const convo = conversationMap[String(user._id)];
+      const lastMessage = convo?.lastMessage;
+      return {
+        ...user.toObject(),
+        lastMessage: lastMessage
+          ? {
+              _id: lastMessage._id,
+              senderId: lastMessage.senderId,
+              text: lastMessage.text,
+              image: lastMessage.image,
+              video: lastMessage.video,
+              createdAt: lastMessage.createdAt,
+            }
+          : null,
+        unreadCount: convo?.unreadCount || 0,
+      };
+    });
+
+    res.status(200).json(usersWithMeta);
   } catch (error) {
     console.error("Error in getUsersForSidebar: ", error.message);
     res.status(500).json({ error: "Internal server error" });
@@ -26,7 +73,13 @@ export const getMessages = async (req, res) => {
         { senderId: myId, receiverId: userToChatId },
         { senderId: userToChatId, receiverId: myId },
       ],
-    });
+    }).sort({ createdAt: 1 });
+
+    // opening the conversation marks their messages as read (non-blocking)
+    Message.updateMany(
+      { senderId: userToChatId, receiverId: myId, read: false },
+      { read: true }
+    ).catch((error) => console.log("Error marking messages read:", error.message));
 
     res.status(200).json(messages);
   } catch (error) {
@@ -35,11 +88,29 @@ export const getMessages = async (req, res) => {
   }
 };
 
+export const markMessagesAsRead = async (req, res) => {
+  try {
+    const { id: senderId } = req.params;
+    const myId = req.user._id;
+
+    await Message.updateMany({ senderId, receiverId: myId, read: false }, { read: true });
+
+    res.status(200).json({ success: true });
+  } catch (error) {
+    console.log("Error in markMessagesAsRead controller: ", error.message);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
 export const sendMessage = async (req, res) => {
   try {
-    const { text, image } = req.body;
+    const { text, image, video } = req.body;
     const { id: receiverId } = req.params;
     const senderId = req.user._id;
+
+    if (!text?.trim() && !image && !video) {
+      return res.status(400).json({ message: "Message cannot be empty" });
+    }
 
     let imageUrl;
     if (image) {
@@ -48,18 +119,30 @@ export const sendMessage = async (req, res) => {
       imageUrl = uploadResponse.secure_url;
     }
 
+    let videoUrl;
+    if (video) {
+      // Upload base64 video to cloudinary (chunked for larger files)
+      const uploadResponse = await cloudinary.uploader.upload(video, {
+        resource_type: "video",
+        chunk_size: 6 * 1024 * 1024,
+      });
+      videoUrl = uploadResponse.secure_url;
+    }
+
     const newMessage = new Message({
       senderId,
       receiverId,
       text,
       image: imageUrl,
+      video: videoUrl,
     });
 
     await newMessage.save();
 
-    const receiverSocketId = getReceiverSocketId(receiverId);
-    if (receiverSocketId) {
-      io.to(receiverSocketId).emit("newMessage", newMessage);
+    // deliver to every open tab of the receiver as soon as the write completes
+    const receiverSocketIds = getReceiverSocketId(receiverId);
+    if (receiverSocketIds) {
+      io.to(receiverSocketIds).emit("newMessage", newMessage);
     }
 
     res.status(201).json(newMessage);

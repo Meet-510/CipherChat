@@ -16,7 +16,8 @@ dotenv.config();
 const PORT = process.env.PORT;
 const __dirname = path.resolve();
 
-app.use(express.json());
+// large limit so base64-encoded photos/videos can be sent as message payloads
+app.use(express.json({ limit: "50mb" }));
 app.use(cookieParser());
 app.use(
   cors({

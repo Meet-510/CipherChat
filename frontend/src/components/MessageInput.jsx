@@ -3,62 +3,84 @@ import { useChatStore } from "../store/useChatStore";
 import { Image, Send, X } from "lucide-react";
 import toast from "react-hot-toast";
 
+const MAX_IMAGE_SIZE_MB = 10;
+const MAX_VIDEO_SIZE_MB = 30;
+
 const MessageInput = () => {
   const [text, setText] = useState("");
-  const [imagePreview, setImagePreview] = useState(null);
+  const [mediaPreview, setMediaPreview] = useState(null); // { type: "image" | "video", data }
   const fileInputRef = useRef(null);
   const { sendMessage } = useChatStore();
 
-  const handleImageChange = (e) => {
+  const handleFileChange = (e) => {
     const file = e.target.files[0];
-    if (!file.type.startsWith("image/")) {
-      toast.error("Please select an image file");
+    if (!file) return;
+
+    const isImage = file.type.startsWith("image/");
+    const isVideo = file.type.startsWith("video/");
+
+    if (!isImage && !isVideo) {
+      toast.error("Please select a photo or video");
+      return;
+    }
+
+    const maxMb = isImage ? MAX_IMAGE_SIZE_MB : MAX_VIDEO_SIZE_MB;
+    if (file.size > maxMb * 1024 * 1024) {
+      toast.error(`${isImage ? "Photo" : "Video"} must be under ${maxMb}MB`);
+      if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
 
     const reader = new FileReader();
     reader.onloadend = () => {
-      setImagePreview(reader.result);
+      setMediaPreview({ type: isImage ? "image" : "video", data: reader.result });
     };
     reader.readAsDataURL(file);
   };
 
-  const removeImage = () => {
-    setImagePreview(null);
+  const removeMedia = () => {
+    setMediaPreview(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const handleSendMessage = async (e) => {
+  const handleSendMessage = (e) => {
     e.preventDefault();
-    if (!text.trim() && !imagePreview) return;
+    if (!text.trim() && !mediaPreview) return;
 
-    try {
-      await sendMessage({
-        text: text.trim(),
-        image: imagePreview,
-      });
+    const messageData = {
+      text: text.trim(),
+      image: mediaPreview?.type === "image" ? mediaPreview.data : undefined,
+      video: mediaPreview?.type === "video" ? mediaPreview.data : undefined,
+    };
 
-      // Clear form
-      setText("");
-      setImagePreview(null);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    } catch (error) {
-      console.error("Failed to send message:", error);
-    }
+    // Clear form immediately — the store shows the message optimistically
+    // and rolls it back if the request fails
+    setText("");
+    setMediaPreview(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+
+    sendMessage(messageData);
   };
 
   return (
     <div className="p-4 w-full">
-      {imagePreview && (
+      {mediaPreview && (
         <div className="mb-3 flex items-center gap-2">
           <div className="relative">
-            <img
-              src={imagePreview}
-              alt="Preview"
-              className="w-20 h-20 object-cover rounded-lg border border-zinc-700"
-            />
+            {mediaPreview.type === "image" ? (
+              <img
+                src={mediaPreview.data}
+                alt="Preview"
+                className="w-20 h-20 object-cover rounded-lg border border-zinc-700"
+              />
+            ) : (
+              <video
+                src={mediaPreview.data}
+                className="w-28 h-20 object-cover rounded-lg border border-zinc-700"
+              />
+            )}
             <button
-              onClick={removeImage}
+              onClick={removeMedia}
               className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-base-300
               flex items-center justify-center"
               type="button"
@@ -80,16 +102,16 @@ const MessageInput = () => {
           />
           <input
             type="file"
-            accept="image/*"
+            accept="image/*,video/*"
             className="hidden"
             ref={fileInputRef}
-            onChange={handleImageChange}
+            onChange={handleFileChange}
           />
 
           <button
             type="button"
             className={`hidden sm:flex btn btn-circle
-                     ${imagePreview ? "text-emerald-500" : "text-zinc-400"}`}
+                     ${mediaPreview ? "text-emerald-500" : "text-zinc-400"}`}
             onClick={() => fileInputRef.current?.click()}
           >
             <Image size={20} />
@@ -98,7 +120,7 @@ const MessageInput = () => {
         <button
           type="submit"
           className="btn btn-sm btn-circle"
-          disabled={!text.trim() && !imagePreview}
+          disabled={!text.trim() && !mediaPreview}
         >
           <Send size={22} />
         </button>
