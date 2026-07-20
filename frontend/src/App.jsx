@@ -8,6 +8,7 @@ import ProfilePage from "./pages/ProfilePage";
 import UserProfilePage from "./pages/UserProfilePage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
+import ProfileSetupPage from "./pages/ProfileSetupPage";
 
 import { Routes, Route, Navigate } from "react-router-dom";
 import { useAuthStore } from "./store/useAuthStore";
@@ -37,7 +38,34 @@ const App = () => {
       <Navbar />
 
       <Routes>
-        <Route path="/" element={authUser ? <HomePage /> : <Navigate to="/login" />} />
+        <Route
+          path="/"
+          element={
+            authUser ? (
+              authUser.username ? (
+                <HomePage />
+              ) : (
+                <Navigate to="/setup" />
+              )
+            ) : (
+              <Navigate to="/login" />
+            )
+          }
+        />
+        <Route
+          path="/setup"
+          element={
+            authUser ? (
+              !authUser.username ? (
+                <ProfileSetupPage />
+              ) : (
+                <Navigate to="/" />
+              )
+            ) : (
+              <Navigate to="/login" />
+            )
+          }
+        />
         <Route path="/signup" element={!authUser ? <SignUpPage /> : <Navigate to="/" />} />
         <Route path="/login" element={!authUser ? <LoginPage /> : <Navigate to="/" />} />
         <Route

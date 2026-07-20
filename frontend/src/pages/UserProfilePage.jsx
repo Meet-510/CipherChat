@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Calendar, Loader } from "lucide-react";
+import { ArrowLeft, Calendar, Loader, MessageSquare } from "lucide-react";
 import toast from "react-hot-toast";
 import { axiosInstance } from "../lib/axios";
 import { useAuthStore } from "../store/useAuthStore";
+import { useChatStore } from "../store/useChatStore";
 
 const UserProfilePage = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { onlineUsers, authUser } = useAuthStore();
+  const { setSelectedUser } = useChatStore();
 
   const [profile, setProfile] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -95,10 +97,24 @@ const UserProfilePage = () => {
 
             <div className="text-center">
               <h2 className="text-2xl font-semibold">{profile.fullName}</h2>
+              {profile.username && (
+                <p className="text-base-content/60 text-sm">@{profile.username}</p>
+              )}
               <p className={`text-sm mt-1 ${isOnline ? "text-green-500" : "text-base-content/60"}`}>
                 {isOnline ? "Online" : "Offline"}
               </p>
             </div>
+
+            <button
+              className="btn btn-primary btn-sm gap-2"
+              onClick={() => {
+                setSelectedUser(profile);
+                navigate("/");
+              }}
+            >
+              <MessageSquare className="size-4" />
+              Message
+            </button>
           </div>
 
           {/* bio */}

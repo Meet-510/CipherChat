@@ -189,16 +189,37 @@ export const resetPassword = async (req, res) => {
   }
 };
 
+// 3-20 chars, letters/numbers/dot/underscore, must start with a letter or number
+const USERNAME_REGEX = /^[a-z0-9][a-z0-9._]{2,19}$/;
+
+const normalizeUsername = (username) =>
+  typeof username === "string" ? username.trim().toLowerCase() : "";
+
 export const updateProfile = async (req, res) => {
   try {
-    const { profilePic, bio } = req.body;
+    const { profilePic, bio, username } = req.body;
     const userId = req.user._id;
 
-    if (profilePic === undefined && bio === undefined) {
+    if (profilePic === undefined && bio === undefined && username === undefined) {
       return res.status(400).json({ message: "Nothing to update" });
     }
 
     const updates = {};
+
+    if (username !== undefined) {
+      const normalized = normalizeUsername(username);
+      if (!USERNAME_REGEX.test(normalized)) {
+        return res.status(400).json({
+          message:
+            "Username must be 3-20 characters (letters, numbers, dots, underscores) and start with a letter or number",
+        });
+      }
+      const taken = await User.findOne({ username: normalized, _id: { $ne: userId } });
+      if (taken) {
+        return res.status(400).json({ message: "Username is already taken" });
+      }
+      updates.username = normalized;
+    }
 
     if (profilePic) {
       const uploadResponse = await cloudinary.uploader.upload(profilePic);
@@ -221,6 +242,7 @@ export const updateProfile = async (req, res) => {
     io.emit("profileUpdated", {
       _id: updatedUser._id,
       fullName: updatedUser.fullName,
+      username: updatedUser.username,
       profilePic: updatedUser.profilePic,
       bio: updatedUser.bio,
     });
@@ -229,6 +251,46 @@ export const updateProfile = async (req, res) => {
   } catch (error) {
     console.log("error in update profile:", error);
     res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const checkUsername = async (req, res) => {
+  try {
+    const normalized = normalizeUsername(req.params.username);
+
+    if (!USERNAME_REGEX.test(normalized)) {
+      return res.status(200).json({ available: false, reason: "invalid" });
+    }
+
+    const taken = await User.findOne({ username: normalized, _id: { $ne: req.user._id } });
+    res.status(200).json({ available: !taken });
+  } catch (error) {
+    console.log("Error in checkUsername controller", error.message);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+export const searchUsers = async (req, res) => {
+  try {
+    const query = (req.query.query || "").trim().toLowerCase();
+    if (!query) return res.status(200).json([]);
+
+    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    const users = await User.find({
+      _id: { $ne: req.user._id },
+      $or: [
+        { username: { $regex: `^${escaped}` } },
+        { fullName: { $regex: escaped, $options: "i" } },
+      ],
+    })
+      .select("fullName username profilePic bio")
+      .limit(10);
+
+    res.status(200).json(users);
+  } catch (error) {
+    console.log("Error in searchUsers controller", error.message);
+    res.status(500).json({ message: "Internal Server Error" });
   }
 };
 

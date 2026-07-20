@@ -11,6 +11,13 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    username: {
+      type: String,
+      unique: true,
+      sparse: true, // existing accounts may not have one until they finish setup
+      lowercase: true,
+      trim: true,
+    },
     password: {
       type: String,
       required: true,

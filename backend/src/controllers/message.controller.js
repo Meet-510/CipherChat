@@ -8,12 +8,17 @@ import { getReceiverSocketId, io } from "../lib/socket.js";
 export const getUsersForSidebar = async (req, res) => {
   try {
     const loggedInUserId = req.user._id;
-    const filteredUsers = await User.find({ _id: { $ne: loggedInUserId } }).select("-password");
 
     // last message + unread count per conversation, Instagram-style
     const myId = new mongoose.Types.ObjectId(String(loggedInUserId));
     const conversations = await Message.aggregate([
-      { $match: { $or: [{ senderId: myId }, { receiverId: myId }] } },
+      {
+        $match: {
+          $or: [{ senderId: myId }, { receiverId: myId }],
+          // ignore self-messages (possible via direct API calls)
+          $expr: { $ne: ["$senderId", "$receiverId"] },
+        },
+      },
       { $sort: { createdAt: -1 } },
       {
         $group: {
@@ -37,24 +42,35 @@ export const getUsersForSidebar = async (req, res) => {
       conversationMap[String(convo._id)] = convo;
     }
 
-    const usersWithMeta = filteredUsers.map((user) => {
-      const convo = conversationMap[String(user._id)];
-      const lastMessage = convo?.lastMessage;
-      return {
-        ...user.toObject(),
-        lastMessage: lastMessage
-          ? {
-              _id: lastMessage._id,
-              senderId: lastMessage.senderId,
-              text: lastMessage.text,
-              image: lastMessage.image,
-              video: lastMessage.video,
-              createdAt: lastMessage.createdAt,
-            }
-          : null,
-        unreadCount: convo?.unreadCount || 0,
-      };
-    });
+    // only people you have a conversation with appear in the chat list;
+    // new people are discovered via search
+    const partnerIds = conversations.map((convo) => convo._id);
+    const conversationUsers = await User.find({ _id: { $in: partnerIds } }).select("-password");
+
+    const usersWithMeta = conversationUsers
+      .map((user) => {
+        const convo = conversationMap[String(user._id)];
+        const lastMessage = convo?.lastMessage;
+        return {
+          ...user.toObject(),
+          lastMessage: lastMessage
+            ? {
+                _id: lastMessage._id,
+                senderId: lastMessage.senderId,
+                text: lastMessage.text,
+                image: lastMessage.image,
+                video: lastMessage.video,
+                createdAt: lastMessage.createdAt,
+              }
+            : null,
+          unreadCount: convo?.unreadCount || 0,
+        };
+      })
+      .sort(
+        (a, b) =>
+          new Date(b.lastMessage?.createdAt || 0).getTime() -
+          new Date(a.lastMessage?.createdAt || 0).getTime()
+      );
 
     res.status(200).json(usersWithMeta);
   } catch (error) {
@@ -110,6 +126,10 @@ export const sendMessage = async (req, res) => {
 
     if (!text?.trim() && !image && !video) {
       return res.status(400).json({ message: "Message cannot be empty" });
+    }
+
+    if (String(senderId) === String(receiverId)) {
+      return res.status(400).json({ message: "You cannot message yourself" });
     }
 
     let imageUrl;

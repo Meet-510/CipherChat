@@ -1,16 +1,48 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuthStore } from "../store/useAuthStore";
-import { Camera, Loader2, Mail, User } from "lucide-react";
+import { axiosInstance } from "../lib/axios";
+import { AtSign, Camera, Check, Loader2, Mail, User, X } from "lucide-react";
 import toast from "react-hot-toast";
 
 const BIO_MAX_LENGTH = 150;
+const USERNAME_REGEX = /^[a-z0-9][a-z0-9._]{2,19}$/;
 
 const ProfilePage = () => {
   const { authUser, isUpdatingProfile, updateProfile } = useAuthStore();
   const [selectedImg, setSelectedImg] = useState(null);
   const [bio, setBio] = useState(authUser?.bio || "");
+  const [username, setUsername] = useState(authUser?.username || "");
+  // idle | checking | available | taken | invalid
+  const [usernameStatus, setUsernameStatus] = useState("idle");
 
-  const hasChanges = selectedImg !== null || bio !== (authUser?.bio || "");
+  const usernameChanged = username.trim().toLowerCase() !== (authUser?.username || "");
+  const hasChanges =
+    selectedImg !== null || bio !== (authUser?.bio || "") || (usernameChanged && username.trim());
+
+  // live availability check, debounced
+  useEffect(() => {
+    const value = username.trim().toLowerCase();
+    if (!value || value === (authUser?.username || "")) {
+      setUsernameStatus("idle");
+      return;
+    }
+    if (!USERNAME_REGEX.test(value)) {
+      setUsernameStatus("invalid");
+      return;
+    }
+
+    setUsernameStatus("checking");
+    const timer = setTimeout(async () => {
+      try {
+        const res = await axiosInstance.get(`/auth/check-username/${value}`);
+        setUsernameStatus(res.data.available ? "available" : "taken");
+      } catch {
+        setUsernameStatus("idle");
+      }
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [username, authUser?.username]);
 
   const handleImageChange = (e) => {
     const file = e.target.files[0];
@@ -29,13 +61,44 @@ const ProfilePage = () => {
   const handleSaveProfile = async () => {
     if (!hasChanges || isUpdatingProfile) return;
 
+    const normalizedUsername = username.trim().toLowerCase();
+    if (usernameChanged && normalizedUsername) {
+      if (!USERNAME_REGEX.test(normalizedUsername)) {
+        return toast.error(
+          "Username must be 3-20 characters (letters, numbers, dots, underscores)"
+        );
+      }
+      if (usernameStatus === "taken") return toast.error("Username is already taken");
+    }
+
     const data = {};
     if (selectedImg) data.profilePic = selectedImg;
     if (bio !== (authUser?.bio || "")) data.bio = bio;
+    if (usernameChanged && normalizedUsername) data.username = normalizedUsername;
 
     await updateProfile(data);
     setSelectedImg(null);
   };
+
+  const usernameHint = {
+    idle: null,
+    checking: (
+      <span className="text-zinc-400 flex items-center gap-1">
+        <Loader2 className="size-3 animate-spin" /> Checking...
+      </span>
+    ),
+    available: (
+      <span className="text-green-500 flex items-center gap-1">
+        <Check className="size-3" /> Available
+      </span>
+    ),
+    taken: (
+      <span className="text-error flex items-center gap-1">
+        <X className="size-3" /> Already taken
+      </span>
+    ),
+    invalid: <span className="text-error">3-20 chars: letters, numbers, dots, underscores</span>,
+  }[usernameStatus];
 
   return (
     <div className="h-screen pt-20">
@@ -94,6 +157,25 @@ const ProfilePage = () => {
 
             <div className="space-y-1.5">
               <div className="text-sm text-zinc-400 flex items-center justify-between">
+                <span className="flex items-center gap-2">
+                  <AtSign className="w-4 h-4" />
+                  Username
+                </span>
+                <span className="text-xs">{usernameHint}</span>
+              </div>
+              <input
+                type="text"
+                className="input input-bordered w-full bg-base-200"
+                placeholder="your_username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value.toLowerCase())}
+                maxLength={20}
+                disabled={isUpdatingProfile}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <div className="text-sm text-zinc-400 flex items-center justify-between">
                 <span className="flex items-center gap-2">Bio</span>
                 <span className={bio.length >= BIO_MAX_LENGTH ? "text-error" : ""}>
                   {bio.length}/{BIO_MAX_LENGTH}
@@ -121,7 +203,12 @@ const ProfilePage = () => {
             <button
               className="btn btn-primary w-full"
               onClick={handleSaveProfile}
-              disabled={!hasChanges || isUpdatingProfile}
+              disabled={
+                !hasChanges ||
+                isUpdatingProfile ||
+                usernameStatus === "taken" ||
+                usernameStatus === "checking"
+              }
             >
               {isUpdatingProfile ? (
                 <>

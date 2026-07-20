@@ -1,11 +1,13 @@
 import express from "express";
 import {
   checkAuth,
+  checkUsername,
   forgotPassword,
   getUserProfile,
   login,
   logout,
   resetPassword,
+  searchUsers,
   signup,
   updateProfile,
 } from "../controllers/auth.controller.js";
@@ -25,5 +27,8 @@ router.put("/update-profile", protectRoute, updateProfile);
 router.get("/check", protectRoute, checkAuth);
 
 router.get("/profile/:id", protectRoute, getUserProfile);
+
+router.get("/check-username/:username", protectRoute, checkUsername);
+router.get("/search", protectRoute, searchUsers);
 
 export default router;
