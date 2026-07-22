@@ -6,9 +6,13 @@ import User from "../models/user.model.js";
 const app = express();
 const server = http.createServer(app);
 
+// same-origin in production (monolith), localhost in dev
+const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
+
 const io = new Server(server, {
   cors: {
-    origin: ["http://localhost:5173"],
+    origin: [CLIENT_URL],
+    credentials: true,
   },
 });
 

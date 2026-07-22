@@ -1,0 +1,42 @@
+# Render Blueprint — single web service (monolith).
+# The backend builds+serves the frontend, so one service runs the whole app.
+# Docs: https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: cipherchat
+    runtime: node
+    plan: free
+    # build the frontend and install backend deps
+    buildCommand: npm run build
+    # start the backend, which serves the built frontend + API + sockets
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # --- set these as SECRETS in the Render dashboard (sync:false = not stored in git) ---
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      # your live app URL, e.g. https://cipherchat.onrender.com (set after first deploy)
+      - key: CLIENT_URL
+        sync: false
+      # Cloudinary — required for photo/video messages and profile pictures
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      # Email (optional) — required only for the Forgot Password flow
+      - key: EMAIL_HOST
+        sync: false
+      - key: EMAIL_PORT
+        sync: false
+      - key: EMAIL_USER
+        sync: false
+      - key: EMAIL_PASS
+        sync: false
+      - key: EMAIL_FROM
+        sync: false

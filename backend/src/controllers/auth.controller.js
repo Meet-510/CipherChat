@@ -8,6 +8,12 @@ import { isValidEmailFormat, isRealEmailDomain, sendPasswordResetEmail } from ".
 
 const normalizeEmail = (email) => (typeof email === "string" ? email.trim().toLowerCase() : "");
 
+// 3-20 chars, letters/numbers/dot/underscore, must start with a letter or number
+const USERNAME_REGEX = /^[a-z0-9][a-z0-9._]{2,19}$/;
+
+const normalizeUsername = (username) =>
+  typeof username === "string" ? username.trim().toLowerCase() : "";
+
 // exact match first, then case-insensitive so accounts created with
 // mixed-case emails (before normalization existed) can still sign in
 const findUserByEmail = async (email) => {
@@ -22,8 +28,9 @@ const findUserByEmail = async (email) => {
 export const signup = async (req, res) => {
   const { fullName, password } = req.body;
   const email = normalizeEmail(req.body.email);
+  const username = normalizeUsername(req.body.username);
   try {
-    if (!fullName || !email || !password) {
+    if (!fullName || !email || !password || !username) {
       return res.status(400).json({ message: "All fields are required" });
     }
 
@@ -35,13 +42,22 @@ export const signup = async (req, res) => {
       return res.status(400).json({ message: "Please use a real email address" });
     }
 
+    if (!USERNAME_REGEX.test(username)) {
+      return res.status(400).json({
+        message:
+          "Username must be 3-20 characters (letters, numbers, dots, underscores) and start with a letter or number",
+      });
+    }
+
     if (password.length < 6) {
       return res.status(400).json({ message: "Password must be at least 6 characters" });
     }
 
-    const user = await findUserByEmail(email);
+    const emailExists = await findUserByEmail(email);
+    if (emailExists) return res.status(400).json({ message: "Email already exists" });
 
-    if (user) return res.status(400).json({ message: "Email already exists" });
+    const usernameExists = await User.findOne({ username });
+    if (usernameExists) return res.status(400).json({ message: "Username is already taken" });
 
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
@@ -49,6 +65,7 @@ export const signup = async (req, res) => {
     const newUser = new User({
       fullName,
       email,
+      username,
       password: hashedPassword,
     });
 
@@ -61,6 +78,7 @@ export const signup = async (req, res) => {
         _id: newUser._id,
         fullName: newUser.fullName,
         email: newUser.email,
+        username: newUser.username,
         profilePic: newUser.profilePic,
       });
     } else {
@@ -74,17 +92,13 @@ export const signup = async (req, res) => {
 
 export const login = async (req, res) => {
   const { password } = req.body;
-  const email = normalizeEmail(req.body.email);
+  const username = normalizeUsername(req.body.username);
   try {
-    if (!email || !password) {
+    if (!username || !password) {
       return res.status(400).json({ message: "All fields are required" });
     }
 
-    if (!isValidEmailFormat(email)) {
-      return res.status(400).json({ message: "Please enter a valid email address" });
-    }
-
-    const user = await findUserByEmail(email);
+    const user = await User.findOne({ username });
 
     if (!user) {
       return res.status(400).json({ message: "Invalid credentials" });
@@ -101,6 +115,7 @@ export const login = async (req, res) => {
       _id: user._id,
       fullName: user.fullName,
       email: user.email,
+      username: user.username,
       profilePic: user.profilePic,
     });
   } catch (error) {
@@ -189,12 +204,6 @@ export const resetPassword = async (req, res) => {
   }
 };
 
-// 3-20 chars, letters/numbers/dot/underscore, must start with a letter or number
-const USERNAME_REGEX = /^[a-z0-9][a-z0-9._]{2,19}$/;
-
-const normalizeUsername = (username) =>
-  typeof username === "string" ? username.trim().toLowerCase() : "";
-
 export const updateProfile = async (req, res) => {
   try {
     const { profilePic, bio, username } = req.body;
@@ -266,6 +275,23 @@ export const checkUsername = async (req, res) => {
     res.status(200).json({ available: !taken });
   } catch (error) {
     console.log("Error in checkUsername controller", error.message);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+// public availability check used during signup (no authenticated user yet)
+export const usernameAvailable = async (req, res) => {
+  try {
+    const normalized = normalizeUsername(req.params.username);
+
+    if (!USERNAME_REGEX.test(normalized)) {
+      return res.status(200).json({ available: false, reason: "invalid" });
+    }
+
+    const taken = await User.findOne({ username: normalized });
+    res.status(200).json({ available: !taken });
+  } catch (error) {
+    console.log("Error in usernameAvailable controller", error.message);
     res.status(500).json({ message: "Internal Server Error" });
   }
 };

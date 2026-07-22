@@ -13,8 +13,8 @@ const userSchema = new mongoose.Schema(
     },
     username: {
       type: String,
+      required: true,
       unique: true,
-      sparse: true, // existing accounts may not have one until they finish setup
       lowercase: true,
       trim: true,
     },
